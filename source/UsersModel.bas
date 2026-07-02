@@ -73,6 +73,9 @@ Public Sub CreateUsersTable
 	DB.Columns.Add(CreateMap("Name": "role", "Default": "user"))
 	DB.Create
 	
+	DB.Columns = Array("username", "email", "password", "role")
+	DB.InsertWithParams = Array("admin", "admin@admin.com", "admin", "admin")
+	
 	Wait For (DB.ExecuteBatchAsync) Complete (Success As Boolean)
 	If Success Then
 		Log("Table Users created successfully!")
