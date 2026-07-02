@@ -8,7 +8,10 @@ Version=10.5
 Sub Class_Globals
     Private RequestCounts As Map
     Private const MAX_REQUESTS_PER_WINDOW As Int = 10 
-    Private const WINDOW_MS As Long = 10000            
+    Private const WINDOW_MS As Long = 10000
+    
+    ' Thread safety using ReentrantLock
+    Private Lock As JavaObject
     
     ' Whitelist Settings
     Private Whitelist As B4XSet
@@ -28,6 +31,7 @@ Sub Class_Globals
 End Sub
 
 Public Sub Initialize
+    Lock.InitializeNewInstance("java.util.concurrent.locks.ReentrantLock", Null)
     RequestCounts.Initialize
     Whitelist.Initialize
     LoadWhitelistFromFile
@@ -39,6 +43,37 @@ Public Sub Initialize
     ' Start background worker
     CleanupTimer.Initialize("CleanupTimer", CLEANUP_INTERVAL_MS)
     CleanupTimer.Enabled = True
+End Sub
+
+' Filter event runs on incoming HTTP requests
+Public Sub Filter (req As ServletRequest, resp As ServletResponse) As Boolean
+    Dim ClientIdentifier As String = ""
+    Dim AuthHeader As String = req.GetHeader("Authorization")
+    
+    If AuthHeader <> "" And AuthHeader <> Null Then
+        If AuthHeader.StartsWith("Bearer ") Then
+            ClientIdentifier = AuthHeader.SubString(7).Trim
+        Else
+            ClientIdentifier = AuthHeader.Trim
+        End If
+    End If
+    
+    Dim UserIP As String = req.GetHeader("CF-Connecting-IP")
+    If UserIP = "" Or UserIP = Null Then UserIP = req.RemoteAddress
+    
+    If ClientIdentifier = "" Then ClientIdentifier = "GUEST-" & UserIP
+    
+    If IsWhitelisted(ClientIdentifier, UserIP) Then Return True
+    
+    Return EnforceRateLimit(ClientIdentifier, req.RequestURI, resp)
+End Sub
+
+Private Sub AcquireLock
+    Lock.RunMethod("lock", Null)
+End Sub
+
+Private Sub ReleaseLock
+    Lock.RunMethod("unlock", Null)
 End Sub
 
 Private Sub LoadWhitelistFromFile
@@ -61,7 +96,7 @@ Private Sub LoadWhitelistFromFile
     End Try
 End Sub
 
-Private Sub LogViolation(Identifier As String, RequestPath As String)
+Private Sub LogViolation (Identifier As String, RequestPath As String)
     Dim LogLine As String = $"[${DateTime.Date(DateTime.Now)} ${DateTime.Time(DateTime.Now)}] BLOCKED: ID/IP [${Identifier}] spamming ${RequestPath}${CRLF}"$
     Try
         Dim Out As OutputStream = File.OpenOutput(File.DirApp, SECURITY_LOG_FILE, True)
@@ -79,7 +114,7 @@ Private Sub LogViolation(Identifier As String, RequestPath As String)
 End Sub
 
 ' Helper method called by the background worker at midnight
-Private Sub GenerateDailySummaryReport(ReportDate As String, BlocksCount As Int)
+Private Sub GenerateDailySummaryReport (ReportDate As String, BlocksCount As Int)
     Dim ReportFile As String = $"daily_report_${ReportDate}.txt"$
     Dim ReportContent As String = _
         $"=========================================${CRLF}"$ & _
@@ -97,106 +132,120 @@ Private Sub GenerateDailySummaryReport(ReportDate As String, BlocksCount As Int)
     End Try
 End Sub
 
-Private Sub IsWhitelisted(Identifier As String, UserIP As String) As Boolean
-    If Whitelist.Contains(Identifier) Or Whitelist.Contains(UserIP) Then Return True
-    
-    ' B4XSet doesn't have Keys property - iterate through all items
-    For Each Rule As String In Whitelist.AsList
-        If Rule.Contains("*") Then
-            Dim Prefix As String = Rule.Replace("*", "")
-            If UserIP.StartsWith(Prefix) Then Return True
+Private Sub IsWhitelisted (Identifier As String, UserIP As String) As Boolean
+    AcquireLock
+    Try
+        If Whitelist.Contains(Identifier) Or Whitelist.Contains(UserIP) Then
+            ReleaseLock
+            Return True
         End If
-    Next
-    Return False
+        
+        ' B4XSet doesn't have Keys property - iterate through all items
+        For Each Rule As String In Whitelist.AsList
+            If Rule.Contains("*") Then
+                Dim Prefix As String = Rule.Replace("*", "")
+                If UserIP.StartsWith(Prefix) Then
+                    ReleaseLock
+                    Return True
+                End If
+            End If
+        Next
+        
+        ReleaseLock
+        Return False
+    Catch
+        Log("RateLimiter Error in IsWhitelisted: " & LastException.Message)
+        ReleaseLock
+        Return False
+    End Try
 End Sub
 
-' Filter event runs on incoming HTTP requests
-Public Sub Filter(Req As ServletRequest, Resp As ServletResponse) As Boolean
-    Dim ClientIdentifier As String = ""
-    Dim AuthHeader As String = Req.GetHeader("Authorization")
-    
-    If AuthHeader <> "" And AuthHeader <> Null Then
-        If AuthHeader.StartsWith("Bearer ") Then
-            ClientIdentifier = AuthHeader.SubString(7).Trim
+Private Sub EnforceRateLimit (Identifier As String, RequestURI As String, Resp As ServletResponse) As Boolean
+    AcquireLock
+    Try
+        Dim Now As Long = DateTime.Now
+        
+        Dim RequestHistory As List
+        
+        If RequestCounts.ContainsKey(Identifier) Then
+            RequestHistory = RequestCounts.Get(Identifier)
         Else
-            ClientIdentifier = AuthHeader.Trim
+            RequestHistory.Initialize
+            RequestCounts.Put(Identifier, RequestHistory)
         End If
-    End If
-    
-    Dim UserIP As String = Req.GetHeader("CF-Connecting-IP")
-    If UserIP = "" Or UserIP = Null Then UserIP = Req.RemoteAddress
-    
-    If ClientIdentifier = "" Then ClientIdentifier = "GUEST-" & UserIP
-    
-    If IsWhitelisted(ClientIdentifier, UserIP) Then Return True
-    
-    Dim Now As Long = DateTime.Now
-    
-    Dim RequestHistory As List
-    
-    If RequestCounts.ContainsKey(ClientIdentifier) Then
-        RequestHistory = RequestCounts.Get(ClientIdentifier)
-    Else
-        RequestHistory.Initialize
-        RequestCounts.Put(ClientIdentifier, RequestHistory)
-    End If
-    
-    Dim CutoffTime As Long = Now - WINDOW_MS
-    Do While RequestHistory.Size > 0 And RequestHistory.Get(0) < CutoffTime
-        RequestHistory.RemoveAt(0)
-    Loop
-    
-    If RequestHistory.Size >= MAX_REQUESTS_PER_WINDOW Then
-        LogViolation(ClientIdentifier, Req.RequestURI)
         
-        Resp.Status = 429 
-        Resp.SetHeader("Retry-After", Bit.ParseInt(WINDOW_MS / 1000, 10))
-        Resp.ContentType = "text/plain"
-        Resp.Write("Too Many Requests. Please wait.")
-        Return False 
-    End If
-    
-    RequestHistory.Add(Now)
-    
-    Return True 
-End Sub
-
-' Background Worker Event: Cleans memory, reloads files, AND checks for daily reset
-Private Sub CleanupTimer_Tick
-    LoadWhitelistFromFile
-    
-    ' 1. Check if the calendar day has rolled over
-    DateTime.DateFormat = "yyyy-MM-dd"
-    Dim CheckTodayString As String = DateTime.Date(DateTime.Now)
-    
-    If CheckTodayString <> CurrentDateString Then
-        ' It is a new day! Save yesterday's summary metrics to a file
-        GenerateDailySummaryReport(CurrentDateString, TotalBlocksToday)
-        
-        ' Reset counters for the brand new day
-        TotalBlocksToday = 0
-        CurrentDateString = CheckTodayString
-    End If
-    
-    ' 2. Clean up stale IP histories from the Map to free RAM
-    Dim Now As Long = DateTime.Now
-    Dim CutoffTime As Long = Now - WINDOW_MS
-    Dim IDsToRemove As List
-    IDsToRemove.Initialize
-    
-    For Each Identifier As String In RequestCounts.Keys
-        Dim RequestHistory As List = RequestCounts.Get(Identifier)
-        
+        Dim CutoffTime As Long = Now - WINDOW_MS
         Do While RequestHistory.Size > 0 And RequestHistory.Get(0) < CutoffTime
             RequestHistory.RemoveAt(0)
         Loop
         
-        If RequestHistory.Size = 0 Then
-            IDsToRemove.Add(Identifier)
+        If RequestHistory.Size >= MAX_REQUESTS_PER_WINDOW Then
+            LogViolation(Identifier, RequestURI)
+            
+            Resp.Status = 429 
+            Resp.SetHeader("Retry-After", NumberFormat(WINDOW_MS / 1000, 1, 0))
+            Resp.ContentType = "text/plain"
+            Resp.Write("Too Many Requests. Please wait.")
+            
+            ReleaseLock
+            Return False 
         End If
-    Next
-    
-    For Each InactiveID As String In IDsToRemove
-        RequestCounts.Remove(InactiveID)
-    Next
+        
+        RequestHistory.Add(Now)
+        
+        ReleaseLock
+        Return True 
+    Catch
+        Log("RateLimiter Error in EnforceRateLimit: " & LastException.Message)
+        ReleaseLock
+        Return True
+    End Try
+End Sub
+
+' Background Worker Event: Cleans memory, reloads files, AND checks for daily reset
+Private Sub CleanupTimer_Tick
+    AcquireLock
+    Try
+        LoadWhitelistFromFile
+        
+        ' 1. Check if the calendar day has rolled over
+        DateTime.DateFormat = "yyyy-MM-dd"
+        Dim CheckTodayString As String = DateTime.Date(DateTime.Now)
+        
+        If CheckTodayString <> CurrentDateString Then
+            ' It is a new day! Save yesterday's summary metrics to a file
+            GenerateDailySummaryReport(CurrentDateString, TotalBlocksToday)
+            
+            ' Reset counters for the brand new day
+            TotalBlocksToday = 0
+            CurrentDateString = CheckTodayString
+        End If
+        
+        ' 2. Clean up stale IP histories from the Map to free RAM
+        Dim Now As Long = DateTime.Now
+        Dim CutoffTime As Long = Now - WINDOW_MS
+        Dim IDsToRemove As List
+        IDsToRemove.Initialize
+        
+        For Each Identifier As String In RequestCounts.Keys
+            Dim RequestHistory As List = RequestCounts.Get(Identifier)
+            
+            Do While RequestHistory.Size > 0 And RequestHistory.Get(0) < CutoffTime
+                RequestHistory.RemoveAt(0)
+            Loop
+            
+            If RequestHistory.Size = 0 Then
+                IDsToRemove.Add(Identifier)
+            End If
+        Next
+        
+        For Each InactiveID As String In IDsToRemove
+            RequestCounts.Remove(InactiveID)
+        Next
+        
+        ReleaseLock
+    Catch
+        Log("RateLimiter Error in CleanupTimer_Tick: " & LastException.Message)
+        ReleaseLock
+    End Try
 End Sub
