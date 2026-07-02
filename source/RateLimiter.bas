@@ -7,8 +7,13 @@ Version=10.5
 'Filter class
 Sub Class_Globals
     Private RequestCounts As Map
-    Private const MAX_REQUESTS_PER_WINDOW As Int = 10 
-    Private const WINDOW_MS As Long = 10000
+    
+    ' Per-endpoint route configuration loaded from Main.GetRateLimitConfig
+    Private RouteConfig As Map
+    
+    ' Default limits (used as fallback)
+    Private MaxRequests As Int = 10
+    Private WindowMs As Long = 10000
     
     ' Thread safety using ReentrantLock
     Private Lock As JavaObject
@@ -33,12 +38,37 @@ End Sub
 Public Sub Initialize
     Lock.InitializeNewInstance("java.util.concurrent.locks.ReentrantLock", Null)
     RequestCounts.Initialize
+    RouteConfig.Initialize
     Whitelist.Initialize
     LoadWhitelistFromFile
+    
+    ' Load per-endpoint limits from the main module if available
+    If SubExists(Main, "GetRateLimitConfig") Then
+        Dim Cfg As Map = CallSub(Main, "GetRateLimitConfig")
+        If Cfg.IsInitialized And Cfg.Size > 0 Then RouteConfig = Cfg
+    End If
     
     ' Set the initial date tracking string (format: YYYY-MM-DD)
     DateTime.DateFormat = "yyyy-MM-dd"
     CurrentDateString = DateTime.Date(DateTime.Now)
+End Sub
+
+' Looks up the request URI in RouteConfig and sets MaxRequests/WindowMs accordingly
+Private Sub ApplyLimitsForURI(URI As String)
+    If RouteConfig.IsInitialized And RouteConfig.Size > 0 Then
+        For Each Pattern As String In RouteConfig.Keys
+            If URI.StartsWith(Pattern) Then
+                Dim Limits As List = RouteConfig.Get(Pattern)
+                If Limits.Size >= 2 Then
+                    MaxRequests = Limits.Get(0)
+                    WindowMs = Limits.Get(1)
+                    Return
+                End If
+            End If
+        Next
+    End If
+    MaxRequests = 10
+    WindowMs = 10000
 End Sub
 
 ' Filter event runs on incoming HTTP requests
@@ -61,6 +91,7 @@ Public Sub Filter (req As ServletRequest, resp As ServletResponse) As Boolean
     
     If IsWhitelisted(ClientIdentifier, UserIP) Then Return True
     
+    ApplyLimitsForURI(req.RequestURI)
     Return EnforceRateLimit(ClientIdentifier, req.RequestURI, resp)
 End Sub
 
@@ -170,16 +201,16 @@ Private Sub EnforceRateLimit (Identifier As String, RequestURI As String, Resp A
             RequestCounts.Put(Identifier, RequestHistory)
         End If
         
-        Dim CutoffTime As Long = Now - WINDOW_MS
+        Dim CutoffTime As Long = Now - WindowMs
         Do While RequestHistory.Size > 0 And RequestHistory.Get(0) < CutoffTime
             RequestHistory.RemoveAt(0)
         Loop
         
-        If RequestHistory.Size >= MAX_REQUESTS_PER_WINDOW Then
+        If RequestHistory.Size >= MaxRequests Then
             LogViolation(Identifier, RequestURI)
             
             Resp.Status = 429 
-            Resp.SetHeader("Retry-After", NumberFormat(WINDOW_MS / 1000, 1, 0))
+            Resp.SetHeader("Retry-After", NumberFormat(WindowMs / 1000, 1, 0))
             Resp.ContentType = "text/plain"
             Resp.Write("Too Many Requests. Please wait.")
             
@@ -221,7 +252,7 @@ Private Sub DoPeriodicMaintenance
     
     ' Clean up stale IP histories from the Map
     Dim Now As Long = DateTime.Now
-    Dim CutoffTime As Long = Now - WINDOW_MS
+    Dim CutoffTime As Long = Now - WindowMs
     Dim IDsToRemove As List
     IDsToRemove.Initialize
     
