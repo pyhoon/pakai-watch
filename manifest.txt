@@ -1,4 +1,4 @@
 Author=Aeric
-Version=0.10
+Version=0.20
 CustomClassTemplates=Rate Limiter|RateLimiter
 Supported Platforms=B4J
