@@ -149,6 +149,16 @@ Private Sub CreateDatabase
 	MDB.QueryExecute = False
 	MDB.QueryAddToBatch = True
 	
+	MDB.Table = "tbl_users"
+	MDB.Columns.Add(CreateMap("Name": "username", "Null": False))
+	MDB.Columns.Add(CreateMap("Name": "email", "Null": False))
+	MDB.Columns.Add(CreateMap("Name": "password", "Null": False))
+	MDB.Columns.Add(CreateMap("Name": "role", "Default": "user"))
+	MDB.Create
+	
+	MDB.Columns = Array("username", "email", "password", "role")
+	MDB.InsertWithParams = Array("admin", "admin@admin.com", "admin", "admin")
+	
 	MDB.Table = "tbl_items"
 	MDB.Columns.Add(CreateMap("Name": "item_code", "Length": "12", "Null": False))
 	MDB.Columns.Add(CreateMap("Name": "item_name", "Null": False))
@@ -160,6 +170,21 @@ Private Sub CreateDatabase
 	MDB.InsertWithParams = Array("ITM001", "Coffee Mug", 12.99, "A ceramic coffee mug.")
 	MDB.InsertWithParams = Array("ITM002", "Wireless Mouse", 29.95, "Ergonomic 2.4GHz wireless mouse.")
 	MDB.InsertWithParams = Array("ITM003", "Notebook", 4.50, "A5 ruled hardcover journal.")
+	
+	MDB.Table = "tbl_employees"
+	MDB.Columns.Add(CreateMap("Name": "employee_name", "Null": False))
+	MDB.Columns.Add(CreateMap("Name": "employee_email", "Null": False))
+	MDB.Columns.Add(CreateMap("Name": "employee_mobile", "Null": True))
+	MDB.Columns.Add(CreateMap("Name": "employee_description", "Null": False))
+	MDB.Columns.Add(CreateMap("Name": "employee_image", "Type": MDB.BLOB))
+	MDB.Columns.Add(CreateMap("Name": "employee_salary", "Type": MDB.DECIMAL, "Default": "0"))
+	MDB.Columns.Add(CreateMap("Name": "department_id", "Type": MDB.INTEGER, "Default": "0"))
+	MDB.Columns.Add(CreateMap("Name": "active", "Type": MDB.INTEGER, "Default": "0"))
+	MDB.Create
+	
+	MDB.Columns = Array("employee_name", "employee_email", "employee_description", "employee_salary")
+	MDB.InsertWithParams = Array("Admin", "admin@admin.com", "Administrator", 69999)
+	MDB.InsertWithParams = Array("Demo", "demo@demo.com", "Demo", 0)
 	
 	Wait For (MDB.ExecuteBatchAsync) Complete (Success As Boolean)
 	If Success Then
