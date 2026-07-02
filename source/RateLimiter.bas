@@ -98,8 +98,10 @@ Private Sub ApplyLimits (URI As String, ClientIdentifier As String)
 End Sub
 
 Public Sub Filter (req As ServletRequest, resp As ServletResponse) As Boolean
-    ' Only rate-limit POST requests. Update filter registration to target specific paths.
-    If req.Method <> "POST" Then Return True
+    ' UI pages: only throttle credential submission, not page loads
+    If req.RequestURI = "/login" Or req.RequestURI = "/register" Then
+        If req.Method <> "POST" Then Return True
+    End If
     
     Dim ClientIdentifier As String = ""
     Dim AuthHeader As String = req.GetHeader("Authorization")
