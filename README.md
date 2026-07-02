@@ -1,6 +1,6 @@
 # Pakai Watch
 
-Version: **0.30** · License: MIT
+Version: **0.40** · License: MIT
 
 A thread-safe sliding-window rate limiter filter for [Pakai Server v6](https://www.b4x.com/android/forum/threads/web-project-template-pakai-server-v6.169224/) / B4J server applications. Protects your endpoints from abuse by throttling excessive requests per client.
 
@@ -49,6 +49,30 @@ End Sub
 ```
 
 Requests that don't match any pattern fall back to the defaults (10 req / 10 s).
+
+### 3. Set per-key limits for specific API keys (optional)
+
+Inside the same config function, add an `__key_overrides__` entry — a `Map` keyed by API client identifier to `List(MaxRequests, WindowMs)`. These take the highest priority:
+
+```b4j
+Public Sub GetRateLimitConfig As Map
+    Dim Cfg As Map
+    Cfg.Initialize
+
+    ' Per-URI limits
+    Cfg.Put("/api/", Array As Int(5, 10000))
+    Cfg.Put("/auth/", Array As Int(3, 30000))
+
+    ' Per-key overrides (beat URI-based and default limits)
+    Dim KeyLimits As Map
+    KeyLimits.Initialize
+    KeyLimits.Put("trusted-partner-key", Array As Int(100, 60000))
+    KeyLimits.Put("premium-client-key", Array As Int(50, 10000))
+    Cfg.Put("__key_overrides__", KeyLimits)
+
+    Return Cfg
+End Sub
+```
 
 ### 3. Create a whitelist (optional)
 
