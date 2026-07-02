@@ -1,6 +1,6 @@
 # Pakai Watch
 
-Version: **0.50** · License: MIT
+Version: **0.60** · License: MIT
 
 A thread-safe sliding-window rate limiter filter for [Pakai Server v6](https://www.b4x.com/android/forum/threads/web-project-template-pakai-server-v6.169224/) / B4J server applications. Protects your endpoints from abuse by throttling excessive requests per client.
 

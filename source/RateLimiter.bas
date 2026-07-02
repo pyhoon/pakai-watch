@@ -13,9 +13,6 @@ Sub Class_Globals
     Private MaxRequests As Int = 10
     Private WindowMs As Long = 10000
     
-    ' Thread safety using ReentrantLock
-    Private Lock As JavaObject
-    
     ' Whitelist Settings
     Private Whitelist As B4XSet
     Private const WHITELIST_FILE As String = "whitelist.txt"
@@ -31,23 +28,19 @@ Sub Class_Globals
 End Sub
 
 Public Sub Initialize
-    ' Initialize Lock
-    Lock.InitializeNewInstance("java.util.concurrent.locks.ReentrantLock", Null)
-    
-    ' Initialize persistent state in Main module (singleton)
+    ' Initialize persistent state in Main module using a server-level ThreadSafeMap
     If Main.RateLimiterRequestCounts.IsInitialized = False Then
-        Main.RateLimiterRequestCounts.Initialize
+        Main.RateLimiterRequestCounts = Main.App.srvr.CreateThreadSafeMap
+        Main.RateLimiterRequestCounts.Put("__meta_blocks", 0)
+        Main.RateLimiterRequestCounts.Put("__meta_date", "")
+        Main.RateLimiterRequestCounts.Put("__meta_processed", 0)
     End If
-    If Main.RateLimiterTotalBlocks = 0 Then Main.RateLimiterTotalBlocks = 0
-    If Main.RateLimiterProcessed = 0 Then Main.RateLimiterProcessed = 0
     
-    ' Initialize per-instance fields
     RouteConfig.Initialize
     KeyOverrides.Initialize
     Whitelist.Initialize
     LoadWhitelistFromFile
     
-    ' Load per-endpoint limits from the main module if available
     If SubExists(Main, "GetRateLimitConfig") Then
         Dim Cfg As Map = CallSub(Main, "GetRateLimitConfig")
         If Cfg.IsInitialized And Cfg.Size > 0 Then
@@ -60,17 +53,15 @@ Public Sub Initialize
         End If
     End If
     
-    ' Set the initial date tracking string
     DateTime.DateFormat = "yyyy-MM-dd"
-    If Main.RateLimiterCurrentDate = "" Then
-        Main.RateLimiterCurrentDate = DateTime.Date(DateTime.Now)
+    Dim savedDate As String = Main.RateLimiterRequestCounts.Get("__meta_date")
+    If savedDate = "" Then
+        Main.RateLimiterRequestCounts.Put("__meta_date", DateTime.Date(DateTime.Now))
     End If
 End Sub
 
-' Converts a config value (List or int[]) to a proper List
 Private Sub AsList (Value As Object) As List
     If Value Is List Then Return Value
-	'Log(GetType(Value))
     Dim Arr() As Int = Value
     Dim L As List
     L.Initialize
@@ -79,9 +70,7 @@ Private Sub AsList (Value As Object) As List
     Return L
 End Sub
 
-' Sets MaxRequests/WindowMs using priority: key override > URI config > default
 Private Sub ApplyLimits (URI As String, ClientIdentifier As String)
-    ' 1. Check per-key override first (highest priority)
     If KeyOverrides.IsInitialized And KeyOverrides.Size > 0 And KeyOverrides.ContainsKey(ClientIdentifier) Then
         Dim Limits As List = AsList(KeyOverrides.Get(ClientIdentifier))
         If Limits.Size >= 2 Then
@@ -91,7 +80,6 @@ Private Sub ApplyLimits (URI As String, ClientIdentifier As String)
         End If
     End If
     
-    ' 2. Check per-URI route config
     If RouteConfig.IsInitialized And RouteConfig.Size > 0 Then
         For Each Pattern As String In RouteConfig.Keys
             If URI.StartsWith(Pattern) Then
@@ -105,13 +93,14 @@ Private Sub ApplyLimits (URI As String, ClientIdentifier As String)
         Next
     End If
     
-    ' 3. Fallback to defaults
     MaxRequests = 10
     WindowMs = 10000
 End Sub
 
-' Filter event runs on incoming HTTP requests
 Public Sub Filter (req As ServletRequest, resp As ServletResponse) As Boolean
+    ' Only rate-limit POST requests. Update filter registration to target specific paths.
+    If req.Method <> "POST" Then Return True
+    
     Dim ClientIdentifier As String = ""
     Dim AuthHeader As String = req.GetHeader("Authorization")
     
@@ -132,14 +121,6 @@ Public Sub Filter (req As ServletRequest, resp As ServletResponse) As Boolean
     
     ApplyLimits(req.RequestURI, ClientIdentifier)
     Return EnforceRateLimit(ClientIdentifier, req.RequestURI, resp)
-End Sub
-
-Private Sub AcquireLock
-    Lock.RunMethod("lock", Null)
-End Sub
-
-Private Sub ReleaseLock
-    Lock.RunMethod("unlock", Null)
 End Sub
 
 Private Sub LoadWhitelistFromFile
@@ -171,15 +152,14 @@ Private Sub LogViolation (Identifier As String, RequestPath As String)
         tw.Write(LogLine)
         tw.Close
         
-        ' Increment the daily summary block counter
-        Main.RateLimiterTotalBlocks = Main.RateLimiterTotalBlocks + 1
+        Dim blocks As Int = Main.RateLimiterRequestCounts.Get("__meta_blocks")
+        Main.RateLimiterRequestCounts.Put("__meta_blocks", blocks + 1)
         
     Catch
         Log("RateLimiter Error: Failed to write to security log: " & LastException.Message)
     End Try
 End Sub
 
-' Helper method called by the background worker at midnight
 Private Sub GenerateDailySummaryReport (ReportDate As String, BlocksCount As Int)
     Dim ReportFile As String = $"daily_report_${ReportDate}.txt"$
     Dim ReportContent As String = _
@@ -199,35 +179,28 @@ Private Sub GenerateDailySummaryReport (ReportDate As String, BlocksCount As Int
 End Sub
 
 Private Sub IsWhitelisted (Identifier As String, UserIP As String) As Boolean
-    AcquireLock
     Try
         If Whitelist.Contains(Identifier) Or Whitelist.Contains(UserIP) Then
-            ReleaseLock
             Return True
         End If
         
-        ' B4XSet doesn't have Keys property - iterate through all items
         For Each Rule As String In Whitelist.AsList
             If Rule.Contains("*") Then
                 Dim Prefix As String = Rule.Replace("*", "")
                 If UserIP.StartsWith(Prefix) Then
-                    ReleaseLock
                     Return True
                 End If
             End If
         Next
         
-        ReleaseLock
         Return False
     Catch
         Log("RateLimiter Error in IsWhitelisted: " & LastException.Message)
-        ReleaseLock
         Return False
     End Try
 End Sub
 
 Private Sub EnforceRateLimit (Identifier As String, RequestURI As String, Resp As ServletResponse) As Boolean
-    AcquireLock
     Try
         Dim Now As Long = DateTime.Now
         
@@ -255,48 +228,48 @@ Private Sub EnforceRateLimit (Identifier As String, RequestURI As String, Resp A
             Resp.Write("Too Many Requests. Please wait.")
             
             DoPeriodicMaintenance
-            ReleaseLock
             Return False 
         End If
         
         RequestHistory.Add(Now)
         
         DoPeriodicMaintenance
-        ReleaseLock
         Return True 
     Catch
         Log("RateLimiter Error in EnforceRateLimit: " & LastException.Message)
-        ReleaseLock
         Return True
     End Try
 End Sub
 
-' Runs periodically inside EnforceRateLimit (inside the lock)
 Private Sub DoPeriodicMaintenance
-    Main.RateLimiterProcessed = Main.RateLimiterProcessed + 1
-    If Main.RateLimiterProcessed < CLEANUP_EVERY Then Return
+    Dim processed As Int = Main.RateLimiterRequestCounts.Get("__meta_processed")
+    processed = processed + 1
+    If processed < CLEANUP_EVERY Then
+        Main.RateLimiterRequestCounts.Put("__meta_processed", processed)
+        Return
+    End If
     
-    Main.RateLimiterProcessed = 0
+    Main.RateLimiterRequestCounts.Put("__meta_processed", 0)
     
     LoadWhitelistFromFile
     
-    ' Check if the calendar day has rolled over
     DateTime.DateFormat = "yyyy-MM-dd"
     Dim CheckTodayString As String = DateTime.Date(DateTime.Now)
     
-    If CheckTodayString <> Main.RateLimiterCurrentDate Then
-        GenerateDailySummaryReport(Main.RateLimiterCurrentDate, Main.RateLimiterTotalBlocks)
-        Main.RateLimiterTotalBlocks = 0
-        Main.RateLimiterCurrentDate = CheckTodayString
+    Dim savedDate As String = Main.RateLimiterRequestCounts.Get("__meta_date")
+    If CheckTodayString <> savedDate Then
+        GenerateDailySummaryReport(savedDate, Main.RateLimiterRequestCounts.Get("__meta_blocks"))
+        Main.RateLimiterRequestCounts.Put("__meta_blocks", 0)
+        Main.RateLimiterRequestCounts.Put("__meta_date", CheckTodayString)
     End If
     
-    ' Clean up stale IP histories from the Map
     Dim Now As Long = DateTime.Now
     Dim CutoffTime As Long = Now - WindowMs
     Dim IDsToRemove As List
     IDsToRemove.Initialize
     
     For Each Identifier As String In Main.RateLimiterRequestCounts.Keys
+        If Identifier.StartsWith("__meta") Then Continue
         Dim RequestHistory As List = Main.RateLimiterRequestCounts.Get(Identifier)
         
         Do While RequestHistory.Size > 0 And RequestHistory.Get(0) < CutoffTime

@@ -42,7 +42,7 @@ Version=10.5
 @EndOfDesignText@
 #Region  Project Attributes
 'Product:   Pakai Watch
-'Version:   0.50
+'Version:   0.60
 'License:   MIT License
 'Developer: Poon Yip Hoon (Aeric)
 #CommandLineArgs:
@@ -57,7 +57,7 @@ Version=10.5
 #End If
 #Region  Macros
 #Macro: Title, Class Templates, ide://run?File=%PROJECT%\create_excluded.bat&Args=..\RateLimiter.bas
-#Macro: Title, Update Manifest, ide://run?File=%ADDITIONAL%\..\B4X\manifest-writer.jar&Args=%PROJECT%\..&Args=%PROJECT%\..&Args=Version&Args=0.50&Args=CustomClassTemplates&Args=Rate+Limiter|RateLimiter
+#Macro: Title, Update Manifest, ide://run?File=%ADDITIONAL%\..\B4X\manifest-writer.jar&Args=%PROJECT%\..&Args=%PROJECT%\..&Args=Version&Args=0.60&Args=CustomClassTemplates&Args=Rate+Limiter|RateLimiter
 #Macro: Title, Create B4xLib, ide://run?File=%JAVABIN%\jar.exe&WorkingDirectory=..\&Args=-cMf&Args=..\release\PakaiWatch.b4xlib&Args=*.b4x_excluded&Args=Snippets&Args=..\manifest.txt&Args=..\LICENSE
 #Macro: Title, Release folder, ide://run?File=%WINDIR%\SysWOW64\explorer.exe&Args=%PROJECT%\..\release
 #Macro: Title, Copy to AddLibs, ide://run?File=%COMSPEC%&Args=/c&Args=copy&Args=%PROJECT%\..\release\*.b4xlib&Args=%ADDITIONAL%\..\B4X
@@ -70,11 +70,8 @@ Sub Process_Globals
 	Public Const APP_VERSION As String = "1.00"
 	Type AlertInfo (Message As String, Status As String)
 	Type ToastInfo (Entity As String, Action As String, Message As String, Status As String)
-	' RateLimiter shared state (persists across requests)
+	' RateLimiter shared state (ThreadSafeMap, persists across requests)
 	Public RateLimiterRequestCounts As Map
-	Public RateLimiterTotalBlocks As Int
-	Public RateLimiterCurrentDate As String
-	Public RateLimiterProcessed As Int
 End Sub
 
 ' <link>Open in browser|http://127.0.0.1:8080</link>
@@ -107,7 +104,10 @@ Sub AppStart (Args() As String)
 	App.Post("/register", "AuthHandler")
 	
 	App.srvr.AddFilter("/*", "AuthFilter", False)
-	App.srvr.AddFilter("/*", "RateLimiter", False) 
+	'App.srvr.AddFilter("/*", "RateLimiter", False)
+	App.srvr.AddFilter("/login", "RateLimiter", False)
+	App.srvr.AddFilter("/register", "RateLimiter", False)
+	App.srvr.AddFilter("/api/items/*", "RateLimiter", False)
 	
 	App.Start
 	App.LogStartupMessage
@@ -145,9 +145,12 @@ Public Sub GetRateLimitConfig As Map
     ' 3 req per 30s for auth endpoints
     ' Cfg.Put("/auth/", Array As Int(3, 30000))
     
-    ' 3 req per 30s for login endpoints
-    Cfg.Put("/login", Array As Int(3, 30000))
-    
+	Cfg.Put("/login", Array As Int(5, 300000))     ' 5 req / 5 minutes
+	Cfg.Put("/register", Array As Int(5, 900000))  ' 5 req / 15 minutes
+	'Cfg.Put("/hx/",   Array As Int(50, 10000))    ' HTMX requests
+	'Cfg.Put("/css/",  Array As Int(100, 10000))   ' static assets
+	'Cfg.Put("/js/",   Array As Int(100, 10000))
+
     ' Per-key overrides (highest priority)
     ' Dim KeyLimits As Map
     ' KeyLimits.Initialize
