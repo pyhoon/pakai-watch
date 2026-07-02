@@ -42,7 +42,7 @@ Version=10.5
 @EndOfDesignText@
 #Region  Project Attributes
 'Product:   Pakai Watch
-'Version:   0.20
+'Version:   0.30
 'License:   MIT License
 'Developer: Poon Yip Hoon (Aeric)
 #CommandLineArgs:
@@ -57,7 +57,7 @@ Version=10.5
 #End If
 #Region  Macros
 #Macro: Title, Class Templates, ide://run?File=%PROJECT%\create_excluded.bat&Args=..\RateLimiter.bas
-#Macro: Title, Update Manifest, ide://run?File=%ADDITIONAL%\..\B4X\manifest-writer.jar&Args=%PROJECT%\..&Args=%PROJECT%\..&Args=Version&Args=0.20&Args=CustomClassTemplates&Args=Rate+Limiter|RateLimiter
+#Macro: Title, Update Manifest, ide://run?File=%ADDITIONAL%\..\B4X\manifest-writer.jar&Args=%PROJECT%\..&Args=%PROJECT%\..&Args=Version&Args=0.30&Args=CustomClassTemplates&Args=Rate+Limiter|RateLimiter
 #Macro: Title, Create B4xLib, ide://run?File=%JAVABIN%\jar.exe&WorkingDirectory=..\&Args=-cMf&Args=..\release\PakaiWatch.b4xlib&Args=*.b4x_excluded&Args=Snippets&Args=..\manifest.txt&Args=..\LICENSE
 #Macro: Title, Release folder, ide://run?File=%WINDIR%\SysWOW64\explorer.exe&Args=%PROJECT%\..\release
 #Macro: Title, Copy to AddLibs, ide://run?File=%COMSPEC%&Args=/c&Args=copy&Args=%PROJECT%\..\release\*.b4xlib&Args=%ADDITIONAL%\..\B4X
