@@ -42,7 +42,7 @@ Version=10.5
 @EndOfDesignText@
 #Region  Project Attributes
 'Product:   Pakai Watch
-'Version:   0.40
+'Version:   0.50
 'License:   MIT License
 'Developer: Poon Yip Hoon (Aeric)
 #CommandLineArgs:
@@ -57,7 +57,7 @@ Version=10.5
 #End If
 #Region  Macros
 #Macro: Title, Class Templates, ide://run?File=%PROJECT%\create_excluded.bat&Args=..\RateLimiter.bas
-#Macro: Title, Update Manifest, ide://run?File=%ADDITIONAL%\..\B4X\manifest-writer.jar&Args=%PROJECT%\..&Args=%PROJECT%\..&Args=Version&Args=0.40&Args=CustomClassTemplates&Args=Rate+Limiter|RateLimiter
+#Macro: Title, Update Manifest, ide://run?File=%ADDITIONAL%\..\B4X\manifest-writer.jar&Args=%PROJECT%\..&Args=%PROJECT%\..&Args=Version&Args=0.50&Args=CustomClassTemplates&Args=Rate+Limiter|RateLimiter
 #Macro: Title, Create B4xLib, ide://run?File=%JAVABIN%\jar.exe&WorkingDirectory=..\&Args=-cMf&Args=..\release\PakaiWatch.b4xlib&Args=*.b4x_excluded&Args=Snippets&Args=..\manifest.txt&Args=..\LICENSE
 #Macro: Title, Release folder, ide://run?File=%WINDIR%\SysWOW64\explorer.exe&Args=%PROJECT%\..\release
 #Macro: Title, Copy to AddLibs, ide://run?File=%COMSPEC%&Args=/c&Args=copy&Args=%PROJECT%\..\release\*.b4xlib&Args=%ADDITIONAL%\..\B4X
@@ -70,6 +70,11 @@ Sub Process_Globals
 	Public Const APP_VERSION As String = "1.00"
 	Type AlertInfo (Message As String, Status As String)
 	Type ToastInfo (Entity As String, Action As String, Message As String, Status As String)
+	' RateLimiter shared state (persists across requests)
+	Public RateLimiterRequestCounts As Map
+	Public RateLimiterTotalBlocks As Int
+	Public RateLimiterCurrentDate As String
+	Public RateLimiterProcessed As Int
 End Sub
 
 ' <link>Open in browser|http://127.0.0.1:8080</link>
@@ -139,6 +144,9 @@ Public Sub GetRateLimitConfig As Map
     
     ' 3 req per 30s for auth endpoints
     ' Cfg.Put("/auth/", Array As Int(3, 30000))
+    
+    ' 3 req per 30s for login endpoints
+    Cfg.Put("/login", Array As Int(3, 30000))
     
     ' Per-key overrides (highest priority)
     ' Dim KeyLimits As Map

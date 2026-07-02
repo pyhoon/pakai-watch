@@ -25,7 +25,7 @@ Sub Handle (req As ServletRequest, resp As ServletResponse)
 	Response = resp
 	Dim Path As String = Request.RequestURI
 	Dim Method As String = Request.Method.ToUpperCase
-	Log($"${Method}: ${Path}"$)
+	Log($"[${Main.CurrentDateTime}] ${Method}: ${Path}"$)
 	If Path = "/login" Then
 		If Method = "GET" Then
 			ShowLoginPage("")

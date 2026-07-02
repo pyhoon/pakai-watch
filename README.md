@@ -1,6 +1,6 @@
 # Pakai Watch
 
-Version: **0.40** · License: MIT
+Version: **0.50** · License: MIT
 
 A thread-safe sliding-window rate limiter filter for [Pakai Server v6](https://www.b4x.com/android/forum/threads/web-project-template-pakai-server-v6.169224/) / B4J server applications. Protects your endpoints from abuse by throttling excessive requests per client.
 
@@ -39,10 +39,10 @@ Public Sub GetRateLimitConfig As Map
     Cfg.Initialize
 
     ' API: 5 requests per 10 seconds
-    Cfg.Put("/api/", Array As Int(5, 10000))
+    Cfg.Put("/api/", Array As Object(5, 10000))
 
     ' Auth: 3 requests per 30 seconds
-    Cfg.Put("/auth/", Array As Int(3, 30000))
+    Cfg.Put("/auth/", Array As Object(3, 30000))
 
     Return Cfg
 End Sub
@@ -60,14 +60,14 @@ Public Sub GetRateLimitConfig As Map
     Cfg.Initialize
 
     ' Per-URI limits
-    Cfg.Put("/api/", Array As Int(5, 10000))
-    Cfg.Put("/auth/", Array As Int(3, 30000))
+    Cfg.Put("/api/", Array As Object(5, 10000))
+    Cfg.Put("/auth/", Array As Object(3, 30000))
 
     ' Per-key overrides (beat URI-based and default limits)
     Dim KeyLimits As Map
     KeyLimits.Initialize
-    KeyLimits.Put("trusted-partner-key", Array As Int(100, 60000))
-    KeyLimits.Put("premium-client-key", Array As Int(50, 10000))
+    KeyLimits.Put("trusted-partner-key", Array As Object(100, 60000))
+    KeyLimits.Put("premium-client-key", Array As Object(50, 10000))
     Cfg.Put("__key_overrides__", KeyLimits)
 
     Return Cfg

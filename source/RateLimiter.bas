@@ -6,8 +6,6 @@ Version=10.5
 @EndOfDesignText@
 'Filter class
 Sub Class_Globals
-    Private RequestCounts As Map
-    
     ' Per-endpoint route configuration loaded from Main.GetRateLimitConfig
     Private RouteConfig As Map
     
@@ -25,13 +23,7 @@ Sub Class_Globals
     ' Logging Settings
     Private const SECURITY_LOG_FILE As String = "security_violations.log"
     
-    ' --- Daily Summary Settings ---
-    Private TotalBlocksToday As Int = 0
-    Private CurrentDateString As String
-    ' ------------------------------
-    
     ' Periodic maintenance (every N requests)
-    Private RequestProcessed As Int = 0
     Private const CLEANUP_EVERY As Int = 100
     
     ' Per-API-key limit overrides (keyed by client identifier)
@@ -39,8 +31,17 @@ Sub Class_Globals
 End Sub
 
 Public Sub Initialize
+    ' Initialize Lock
     Lock.InitializeNewInstance("java.util.concurrent.locks.ReentrantLock", Null)
-    RequestCounts.Initialize
+    
+    ' Initialize persistent state in Main module (singleton)
+    If Main.RateLimiterRequestCounts.IsInitialized = False Then
+        Main.RateLimiterRequestCounts.Initialize
+    End If
+    If Main.RateLimiterTotalBlocks = 0 Then Main.RateLimiterTotalBlocks = 0
+    If Main.RateLimiterProcessed = 0 Then Main.RateLimiterProcessed = 0
+    
+    ' Initialize per-instance fields
     RouteConfig.Initialize
     KeyOverrides.Initialize
     Whitelist.Initialize
@@ -50,7 +51,6 @@ Public Sub Initialize
     If SubExists(Main, "GetRateLimitConfig") Then
         Dim Cfg As Map = CallSub(Main, "GetRateLimitConfig")
         If Cfg.IsInitialized And Cfg.Size > 0 Then
-            ' Extract per-key overrides before storing the rest as route config
             If Cfg.ContainsKey("__key_overrides__") Then
                 Dim Ko As Map = Cfg.Get("__key_overrides__")
                 If Ko.IsInitialized And Ko.Size > 0 Then KeyOverrides = Ko
@@ -60,16 +60,30 @@ Public Sub Initialize
         End If
     End If
     
-    ' Set the initial date tracking string (format: YYYY-MM-DD)
+    ' Set the initial date tracking string
     DateTime.DateFormat = "yyyy-MM-dd"
-    CurrentDateString = DateTime.Date(DateTime.Now)
+    If Main.RateLimiterCurrentDate = "" Then
+        Main.RateLimiterCurrentDate = DateTime.Date(DateTime.Now)
+    End If
+End Sub
+
+' Converts a config value (List or int[]) to a proper List
+Private Sub AsList (Value As Object) As List
+    If Value Is List Then Return Value
+	'Log(GetType(Value))
+    Dim Arr() As Int = Value
+    Dim L As List
+    L.Initialize
+    L.Add(Arr(0))
+    L.Add(Arr(1))
+    Return L
 End Sub
 
 ' Sets MaxRequests/WindowMs using priority: key override > URI config > default
-Private Sub ApplyLimits(URI As String, ClientIdentifier As String)
+Private Sub ApplyLimits (URI As String, ClientIdentifier As String)
     ' 1. Check per-key override first (highest priority)
     If KeyOverrides.IsInitialized And KeyOverrides.Size > 0 And KeyOverrides.ContainsKey(ClientIdentifier) Then
-        Dim Limits As List = KeyOverrides.Get(ClientIdentifier)
+        Dim Limits As List = AsList(KeyOverrides.Get(ClientIdentifier))
         If Limits.Size >= 2 Then
             MaxRequests = Limits.Get(0)
             WindowMs = Limits.Get(1)
@@ -81,7 +95,7 @@ Private Sub ApplyLimits(URI As String, ClientIdentifier As String)
     If RouteConfig.IsInitialized And RouteConfig.Size > 0 Then
         For Each Pattern As String In RouteConfig.Keys
             If URI.StartsWith(Pattern) Then
-                Dim Limits As List = RouteConfig.Get(Pattern)
+                Dim Limits As List = AsList(RouteConfig.Get(Pattern))
                 If Limits.Size >= 2 Then
                     MaxRequests = Limits.Get(0)
                     WindowMs = Limits.Get(1)
@@ -158,7 +172,7 @@ Private Sub LogViolation (Identifier As String, RequestPath As String)
         tw.Close
         
         ' Increment the daily summary block counter
-        TotalBlocksToday = TotalBlocksToday + 1
+        Main.RateLimiterTotalBlocks = Main.RateLimiterTotalBlocks + 1
         
     Catch
         Log("RateLimiter Error: Failed to write to security log: " & LastException.Message)
@@ -218,12 +232,13 @@ Private Sub EnforceRateLimit (Identifier As String, RequestURI As String, Resp A
         Dim Now As Long = DateTime.Now
         
         Dim RequestHistory As List
+        Dim HadExisting As Boolean = Main.RateLimiterRequestCounts.ContainsKey(Identifier)
         
-        If RequestCounts.ContainsKey(Identifier) Then
-            RequestHistory = RequestCounts.Get(Identifier)
+        If HadExisting Then
+            RequestHistory = Main.RateLimiterRequestCounts.Get(Identifier)
         Else
             RequestHistory.Initialize
-            RequestCounts.Put(Identifier, RequestHistory)
+            Main.RateLimiterRequestCounts.Put(Identifier, RequestHistory)
         End If
         
         Dim CutoffTime As Long = Now - WindowMs
@@ -258,10 +273,10 @@ End Sub
 
 ' Runs periodically inside EnforceRateLimit (inside the lock)
 Private Sub DoPeriodicMaintenance
-    RequestProcessed = RequestProcessed + 1
-    If RequestProcessed < CLEANUP_EVERY Then Return
+    Main.RateLimiterProcessed = Main.RateLimiterProcessed + 1
+    If Main.RateLimiterProcessed < CLEANUP_EVERY Then Return
     
-    RequestProcessed = 0
+    Main.RateLimiterProcessed = 0
     
     LoadWhitelistFromFile
     
@@ -269,10 +284,10 @@ Private Sub DoPeriodicMaintenance
     DateTime.DateFormat = "yyyy-MM-dd"
     Dim CheckTodayString As String = DateTime.Date(DateTime.Now)
     
-    If CheckTodayString <> CurrentDateString Then
-        GenerateDailySummaryReport(CurrentDateString, TotalBlocksToday)
-        TotalBlocksToday = 0
-        CurrentDateString = CheckTodayString
+    If CheckTodayString <> Main.RateLimiterCurrentDate Then
+        GenerateDailySummaryReport(Main.RateLimiterCurrentDate, Main.RateLimiterTotalBlocks)
+        Main.RateLimiterTotalBlocks = 0
+        Main.RateLimiterCurrentDate = CheckTodayString
     End If
     
     ' Clean up stale IP histories from the Map
@@ -281,8 +296,8 @@ Private Sub DoPeriodicMaintenance
     Dim IDsToRemove As List
     IDsToRemove.Initialize
     
-    For Each Identifier As String In RequestCounts.Keys
-        Dim RequestHistory As List = RequestCounts.Get(Identifier)
+    For Each Identifier As String In Main.RateLimiterRequestCounts.Keys
+        Dim RequestHistory As List = Main.RateLimiterRequestCounts.Get(Identifier)
         
         Do While RequestHistory.Size > 0 And RequestHistory.Get(0) < CutoffTime
             RequestHistory.RemoveAt(0)
@@ -294,6 +309,6 @@ Private Sub DoPeriodicMaintenance
     Next
     
     For Each InactiveID As String In IDsToRemove
-        RequestCounts.Remove(InactiveID)
+        Main.RateLimiterRequestCounts.Remove(InactiveID)
     Next
 End Sub
