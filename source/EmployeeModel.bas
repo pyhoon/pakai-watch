@@ -155,6 +155,10 @@ Public Sub CreateEmployeesTable
 	DB.Columns.Add(CreateMap("Name": "active", "Type": DB.INTEGER, "Default": "0"))
 	DB.Create
 	
+	DB.Columns = Array("employee_name", "employee_email", "employee_description", "employee_salary")
+	DB.InsertWithParams = Array("Admin", "admin@admin.com", "Administrator", 69999)
+	DB.InsertWithParams = Array("Demo", "demo@demo.com", "Demo", 0)
+	
 	Wait For (DB.ExecuteBatchAsync) Complete (Success As Boolean)
 	If Success Then
 		Log("Table Employees created successfully!")
