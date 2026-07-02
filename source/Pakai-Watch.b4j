@@ -127,6 +127,21 @@ Public Sub HRM As HttpResponseMessage
 	Return HRM1
 End Sub
 
+' Returns per-endpoint rate limit configuration.
+' Key: URL prefix pattern, Value: List(MaxRequests, WindowMs)
+Public Sub GetRateLimitConfig As Map
+    Dim Cfg As Map
+    Cfg.Initialize
+    
+    ' Example: 5 req per 10s for API endpoints
+    ' Cfg.Put("/api/", Array As Int(5, 10000))
+    
+    ' Example: 3 req per 30s for auth endpoints
+    ' Cfg.Put("/auth/", Array As Int(3, 30000))
+    
+    Return Cfg
+End Sub
+
 Public Sub CurrentDateTime As String
 	Dim CurrentDateFormat As String = DateTime.DateFormat
 	DateTime.DateFormat = "yyyy-MM-dd HH:mm:ss"
