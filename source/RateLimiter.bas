@@ -25,9 +25,9 @@ Sub Class_Globals
     Private CurrentDateString As String
     ' ------------------------------
     
-    ' Background Worker Settings
-    Private CleanupTimer As Timer
-    Private const CLEANUP_INTERVAL_MS As Long = 300000 ' Runs every 5 minutes
+    ' Periodic maintenance (every N requests)
+    Private RequestProcessed As Int = 0
+    Private const CLEANUP_EVERY As Int = 100
 End Sub
 
 Public Sub Initialize
@@ -39,10 +39,6 @@ Public Sub Initialize
     ' Set the initial date tracking string (format: YYYY-MM-DD)
     DateTime.DateFormat = "yyyy-MM-dd"
     CurrentDateString = DateTime.Date(DateTime.Now)
-    
-    ' Start background worker
-    CleanupTimer.Initialize("CleanupTimer", CLEANUP_INTERVAL_MS)
-    CleanupTimer.Enabled = True
 End Sub
 
 ' Filter event runs on incoming HTTP requests
@@ -187,12 +183,14 @@ Private Sub EnforceRateLimit (Identifier As String, RequestURI As String, Resp A
             Resp.ContentType = "text/plain"
             Resp.Write("Too Many Requests. Please wait.")
             
+            DoPeriodicMaintenance
             ReleaseLock
             Return False 
         End If
         
         RequestHistory.Add(Now)
         
+        DoPeriodicMaintenance
         ReleaseLock
         Return True 
     Catch
@@ -202,50 +200,44 @@ Private Sub EnforceRateLimit (Identifier As String, RequestURI As String, Resp A
     End Try
 End Sub
 
-' Background Worker Event: Cleans memory, reloads files, AND checks for daily reset
-Private Sub CleanupTimer_Tick
-    AcquireLock
-    Try
-        LoadWhitelistFromFile
+' Runs periodically inside EnforceRateLimit (inside the lock)
+Private Sub DoPeriodicMaintenance
+    RequestProcessed = RequestProcessed + 1
+    If RequestProcessed < CLEANUP_EVERY Then Return
+    
+    RequestProcessed = 0
+    
+    LoadWhitelistFromFile
+    
+    ' Check if the calendar day has rolled over
+    DateTime.DateFormat = "yyyy-MM-dd"
+    Dim CheckTodayString As String = DateTime.Date(DateTime.Now)
+    
+    If CheckTodayString <> CurrentDateString Then
+        GenerateDailySummaryReport(CurrentDateString, TotalBlocksToday)
+        TotalBlocksToday = 0
+        CurrentDateString = CheckTodayString
+    End If
+    
+    ' Clean up stale IP histories from the Map
+    Dim Now As Long = DateTime.Now
+    Dim CutoffTime As Long = Now - WINDOW_MS
+    Dim IDsToRemove As List
+    IDsToRemove.Initialize
+    
+    For Each Identifier As String In RequestCounts.Keys
+        Dim RequestHistory As List = RequestCounts.Get(Identifier)
         
-        ' 1. Check if the calendar day has rolled over
-        DateTime.DateFormat = "yyyy-MM-dd"
-        Dim CheckTodayString As String = DateTime.Date(DateTime.Now)
+        Do While RequestHistory.Size > 0 And RequestHistory.Get(0) < CutoffTime
+            RequestHistory.RemoveAt(0)
+        Loop
         
-        If CheckTodayString <> CurrentDateString Then
-            ' It is a new day! Save yesterday's summary metrics to a file
-            GenerateDailySummaryReport(CurrentDateString, TotalBlocksToday)
-            
-            ' Reset counters for the brand new day
-            TotalBlocksToday = 0
-            CurrentDateString = CheckTodayString
+        If RequestHistory.Size = 0 Then
+            IDsToRemove.Add(Identifier)
         End If
-        
-        ' 2. Clean up stale IP histories from the Map to free RAM
-        Dim Now As Long = DateTime.Now
-        Dim CutoffTime As Long = Now - WINDOW_MS
-        Dim IDsToRemove As List
-        IDsToRemove.Initialize
-        
-        For Each Identifier As String In RequestCounts.Keys
-            Dim RequestHistory As List = RequestCounts.Get(Identifier)
-            
-            Do While RequestHistory.Size > 0 And RequestHistory.Get(0) < CutoffTime
-                RequestHistory.RemoveAt(0)
-            Loop
-            
-            If RequestHistory.Size = 0 Then
-                IDsToRemove.Add(Identifier)
-            End If
-        Next
-        
-        For Each InactiveID As String In IDsToRemove
-            RequestCounts.Remove(InactiveID)
-        Next
-        
-        ReleaseLock
-    Catch
-        Log("RateLimiter Error in CleanupTimer_Tick: " & LastException.Message)
-        ReleaseLock
-    End Try
+    Next
+    
+    For Each InactiveID As String In IDsToRemove
+        RequestCounts.Remove(InactiveID)
+    Next
 End Sub
