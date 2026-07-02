@@ -33,19 +33,31 @@ Sub Class_Globals
     ' Periodic maintenance (every N requests)
     Private RequestProcessed As Int = 0
     Private const CLEANUP_EVERY As Int = 100
+    
+    ' Per-API-key limit overrides (keyed by client identifier)
+    Private KeyOverrides As Map
 End Sub
 
 Public Sub Initialize
     Lock.InitializeNewInstance("java.util.concurrent.locks.ReentrantLock", Null)
     RequestCounts.Initialize
     RouteConfig.Initialize
+    KeyOverrides.Initialize
     Whitelist.Initialize
     LoadWhitelistFromFile
     
     ' Load per-endpoint limits from the main module if available
     If SubExists(Main, "GetRateLimitConfig") Then
         Dim Cfg As Map = CallSub(Main, "GetRateLimitConfig")
-        If Cfg.IsInitialized And Cfg.Size > 0 Then RouteConfig = Cfg
+        If Cfg.IsInitialized And Cfg.Size > 0 Then
+            ' Extract per-key overrides before storing the rest as route config
+            If Cfg.ContainsKey("__key_overrides__") Then
+                Dim Ko As Map = Cfg.Get("__key_overrides__")
+                If Ko.IsInitialized And Ko.Size > 0 Then KeyOverrides = Ko
+                Cfg.Remove("__key_overrides__")
+            End If
+            RouteConfig = Cfg
+        End If
     End If
     
     ' Set the initial date tracking string (format: YYYY-MM-DD)
@@ -53,8 +65,19 @@ Public Sub Initialize
     CurrentDateString = DateTime.Date(DateTime.Now)
 End Sub
 
-' Looks up the request URI in RouteConfig and sets MaxRequests/WindowMs accordingly
-Private Sub ApplyLimitsForURI(URI As String)
+' Sets MaxRequests/WindowMs using priority: key override > URI config > default
+Private Sub ApplyLimits(URI As String, ClientIdentifier As String)
+    ' 1. Check per-key override first (highest priority)
+    If KeyOverrides.IsInitialized And KeyOverrides.Size > 0 And KeyOverrides.ContainsKey(ClientIdentifier) Then
+        Dim Limits As List = KeyOverrides.Get(ClientIdentifier)
+        If Limits.Size >= 2 Then
+            MaxRequests = Limits.Get(0)
+            WindowMs = Limits.Get(1)
+            Return
+        End If
+    End If
+    
+    ' 2. Check per-URI route config
     If RouteConfig.IsInitialized And RouteConfig.Size > 0 Then
         For Each Pattern As String In RouteConfig.Keys
             If URI.StartsWith(Pattern) Then
@@ -67,6 +90,8 @@ Private Sub ApplyLimitsForURI(URI As String)
             End If
         Next
     End If
+    
+    ' 3. Fallback to defaults
     MaxRequests = 10
     WindowMs = 10000
 End Sub
@@ -91,7 +116,7 @@ Public Sub Filter (req As ServletRequest, resp As ServletResponse) As Boolean
     
     If IsWhitelisted(ClientIdentifier, UserIP) Then Return True
     
-    ApplyLimitsForURI(req.RequestURI)
+    ApplyLimits(req.RequestURI, ClientIdentifier)
     Return EnforceRateLimit(ClientIdentifier, req.RequestURI, resp)
 End Sub
 
