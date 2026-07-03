@@ -150,10 +150,10 @@ Private Sub EmployeesPage As MiniHtml
 	
 	' Add extra navbar navigation if needed
 	If mShowLogout Then
+		ItemLink.up(navitem1)
 		If App.api.EnableHelp Then
 			HelpLink.up(navitem1)
-		End If		
-		ItemLink.up(navitem1)
+		End If
 		LogoutLink.up(navitem1)
 	End If
 	Return page1
