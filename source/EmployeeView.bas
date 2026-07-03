@@ -150,6 +150,9 @@ Private Sub EmployeesPage As MiniHtml
 	
 	' Add extra navbar navigation if needed
 	If mShowLogout Then
+		If App.api.EnableHelp Then
+			HelpLink.up(navitem1)
+		End If		
 		ItemLink.up(navitem1)
 		LogoutLink.up(navitem1)
 	End If
@@ -415,5 +418,13 @@ Private Sub ItemLink As MiniHtml
 	Dim a1 As MiniHtml = MH.Anchor.up(li1).cls("nav-link float-end").attr("href", "/")
 	MH.Icon.up(a1).cls("bi bi-box-seam me-2")
 	a1.text("Items")
+	Return li1
+End Sub
+
+Private Sub HelpLink As MiniHtml
+	Dim li1 As MiniHtml = MH.Li.cls("nav-item d-block d-lg-block")
+	Dim a1 As MiniHtml = MH.Anchor.up(li1).cls("nav-link float-end").attr("href", "/help")
+	MH.Icon.up(a1).cls("bi bi-gear me-2").attr("title", "API")
+	a1.text("API")
 	Return li1
 End Sub
