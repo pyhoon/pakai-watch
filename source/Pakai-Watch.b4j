@@ -22,11 +22,12 @@ Library8=vest
 Library9=webapiutils
 Module1=AuthFilter
 Module10=EmployeeView
-Module11=MainView
-Module12=MH
-Module13=ORM
-Module14=RateLimiter
-Module15=UsersModel
+Module11=HelpHandler
+Module12=MainView
+Module13=MH
+Module14=ORM
+Module15=RateLimiter
+Module16=UsersModel
 Module2=AuthHandler
 Module3=AuthView
 Module4=CrudApiHandler
@@ -37,7 +38,7 @@ Module8=EmployeeHandler
 Module9=EmployeeModel
 NumberOfFiles=4
 NumberOfLibraries=9
-NumberOfModules=15
+NumberOfModules=16
 Version=10.5
 @EndOfDesignText@
 #Region  Project Attributes
@@ -91,6 +92,9 @@ Sub AppStart (Args() As String)
 	App.Rest("/hx/items/*", "CrudHandler")
 	App.Get("/employees", "EmployeeHandler")
 	App.Rest("/hx/employees/*", "EmployeeHandler")
+	
+	' API documentation
+	App.Get("/help", "HelpHandler")
 	
 	' For REST API
 	App.Rest("/api/items/*", "CrudApiHandler")
