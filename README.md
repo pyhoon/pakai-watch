@@ -14,7 +14,7 @@ A thread-safe sliding-window rate limiter filter for [Pakai Server v6](https://w
 - **Security logging** — blocked requests logged to `security_violations.log` with timestamps
 - **Daily summary reports** — midnight rollover generates `daily_report_YYYY-MM-DD.txt`
 - **`Retry-After` header** — 429 responses include seconds until the window resets
-- **Thread-safe** — uses `java.util.concurrent.locks.ReentrantLock` to protect shared state
+- **Thread-safe** — uses `srvr.CreateThreadSafeMap` to protect shared state
 - **No timer thread** — lazy periodic maintenance runs inline every 100 requests (whitelist reload, stale entry cleanup, day rollover check)
 - **Optional SingleThreadHandler** — pass `True` to `AddFilter` to serialize filter calls if desired
 
