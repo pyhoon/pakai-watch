@@ -130,7 +130,6 @@ Public Sub HRM As HttpResponseMessage
 	Dim HRM1 As HttpResponseMessage
 	HRM1.Initialize
 	HRM1.VerboseMode = Api.VerboseMode
-	HRM1.OrderedKeys = Api.OrderedKeys
 	HRM1.ContentType = Api.ContentType
 	HRM1.PayloadType = Api.PayloadType
 	Return HRM1
