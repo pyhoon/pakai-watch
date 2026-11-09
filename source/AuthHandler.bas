@@ -63,7 +63,7 @@ Private Sub HandleLogin
 	
 	Dim row As Map = Model.GetRowByUsername(user)
 	If Model.Error.IsInitialized Then
-		ShowRegisterPage("Error creating user: " & Model.Error.Message)
+		ShowLoginPage("Error reading user: " & Model.Error.Message)
 		'ShowAlert(Model.Error.Message, "danger")
 		Return
 	End If
